@@ -279,7 +279,7 @@ function Orders() {
           >
             <MenuItem value="All Parties">All Parties</MenuItem>
             {ledgers.map(ledger => (
-              <MenuItem key={ledger.id} value={ledger.id}>{ledger.party_name}</MenuItem>
+              <MenuItem key={ledger._id} value={ledger._id}>{ledger.party_name}</MenuItem>
             ))}
           </TextField>
 
@@ -292,7 +292,7 @@ function Orders() {
           >
             <MenuItem value="All Items">All Items</MenuItem>
             {items.map(item => (
-              <MenuItem key={item.id} value={item.id}>{item.item_name}</MenuItem>
+              <MenuItem key={item._id} value={item._id}>{item.item_name}</MenuItem>
             ))}
           </TextField>
 
