@@ -1,0 +1,894 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Button,
+  TextField,
+  MenuItem,
+  IconButton,
+  Collapse,
+  Tabs,
+  Tab,
+  Divider,
+  useTheme,
+  useMediaQuery,
+  Autocomplete,
+  Paper,
+} from '@mui/material';
+import {
+  Add,
+  Delete,
+  ExpandMore,
+  ExpandLess,
+  Save,
+  ArrowBack,
+} from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { useNotification } from '../components/Notification';
+
+const API_BASE = '/api';
+
+function CreateOrder() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const navigate = useNavigate();
+  const { showNotification } = useNotification();
+
+  // Order Header State
+  const [orderHeader, setOrderHeader] = useState({
+    party_name: '',
+    ledger_id: '',
+    order_number: '',
+    order_date: new Date().toISOString().split('T')[0],
+  });
+
+  // Order Items State (multiple items)
+  const [orderItems, setOrderItems] = useState([
+    {
+      id: 1,
+      item_id: '',
+      item_name: '',
+      item_code: '',
+      hsn_code: '',
+      gst_rate: '',
+      qty_mt: '',
+      qty_pcs: '',
+      rate: '',
+      amount: 0,
+      expanded: true,
+    }
+  ]);
+
+  // Data from API
+  const [ledgers, setLedgers] = useState([]);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // Mobile Tabs
+  const [activeTab, setActiveTab] = useState(0);
+
+  // Expanded items for mobile view
+  const [expandedItems, setExpandedItems] = useState({ 1: true });
+
+  useEffect(() => {
+    fetchLedgers();
+    fetchItems();
+    generateOrderNumber();
+  }, []);
+
+  const fetchLedgers = async () => {
+    try {
+      const { data } = await axios.get(`${API_BASE}/ledgers`);
+      setLedgers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error fetching ledgers:', error);
+    }
+  };
+
+  const fetchItems = async () => {
+    try {
+      const { data } = await axios.get(`${API_BASE}/items`);
+      setItems(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error fetching items:', error);
+    }
+  };
+
+  const generateOrderNumber = async () => {
+    try {
+      const { data } = await axios.get(`${API_BASE}/utility/next-order-number`);
+      if (data.success) {
+        setOrderHeader(prev => ({
+          ...prev,
+          order_number: data.order_number
+        }));
+        showNotification(`Generated Order Number: ${data.order_number}`, 'success');
+      }
+    } catch (error) {
+      console.error('Error generating order number:', error);
+      showNotification('Failed to generate order number', 'error');
+    }
+  };
+
+  const handlePartySelect = (event, newValue) => {
+    if (newValue) {
+      setOrderHeader(prev => ({
+        ...prev,
+        party_name: newValue.party_name,
+        ledger_id: newValue.id
+      }));
+    } else {
+      setOrderHeader(prev => ({
+        ...prev,
+        party_name: '',
+        ledger_id: ''
+      }));
+    }
+  };
+
+  const handleItemSelect = (index, selectedItem) => {
+    if (selectedItem) {
+      const updatedItems = [...orderItems];
+      updatedItems[index] = {
+        ...updatedItems[index],
+        item_id: selectedItem.id,
+        item_name: selectedItem.item_name,
+        item_code: selectedItem.item_code || '',
+        hsn_code: selectedItem.hsn_code || '',
+        gst_rate: selectedItem.gst_rate || '',
+        rate: selectedItem.opening_value || '',
+      };
+      // Recalculate amount
+      updatedItems[index].amount = calculateAmount(updatedItems[index]);
+      setOrderItems(updatedItems);
+    }
+  };
+
+  const handleItemChange = (index, field, value) => {
+    const updatedItems = [...orderItems];
+    updatedItems[index][field] = value;
+    // Recalculate amount when quantity or rate changes
+    if (['qty_mt', 'qty_pcs', 'rate'].includes(field)) {
+      updatedItems[index].amount = calculateAmount(updatedItems[index]);
+    }
+    setOrderItems(updatedItems);
+  };
+
+  const calculateAmount = (item) => {
+    const qtyMt = parseFloat(item.qty_mt) || 0;
+    const qtyPcs = parseFloat(item.qty_pcs) || 0;
+    const rate = parseFloat(item.rate) || 0;
+    // Assuming MT takes priority, otherwise use PCS
+    const totalQty = qtyMt > 0 ? qtyMt : qtyPcs;
+    return (totalQty * rate).toFixed(2);
+  };
+
+  const addNewItem = () => {
+    const newId = orderItems.length + 1;
+    setOrderItems([
+      ...orderItems,
+      {
+        id: newId,
+        item_id: '',
+        item_name: '',
+        item_code: '',
+        hsn_code: '',
+        gst_rate: '',
+        qty_mt: '',
+        qty_pcs: '',
+        rate: '',
+        amount: 0,
+        expanded: true,
+      }
+    ]);
+    setExpandedItems(prev => ({ ...prev, [newId]: true }));
+  };
+
+  const removeItem = (index) => {
+    if (orderItems.length > 1) {
+      const updatedItems = orderItems.filter((_, i) => i !== index);
+      setOrderItems(updatedItems);
+    }
+  };
+
+  const toggleItemExpand = (itemId) => {
+    setExpandedItems(prev => ({
+      ...prev,
+      [itemId]: !prev[itemId]
+    }));
+  };
+
+  const calculateTotal = () => {
+    return orderItems.reduce((total, item) => total + parseFloat(item.amount || 0), 0).toFixed(2);
+  };
+
+  const handleSubmit = async () => {
+    // Validation
+    if (!orderHeader.ledger_id) {
+      showNotification('Please select a party', 'error');
+      return;
+    }
+
+    if (!orderHeader.order_number) {
+      showNotification('Please generate an order number', 'error');
+      return;
+    }
+
+    const validItems = orderItems.filter(item => item.item_id && (item.qty_mt || item.qty_pcs));
+    if (validItems.length === 0) {
+      showNotification('Please add at least one item with quantity', 'error');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Create bulk order with all items in one request
+      const orderData = {
+        order_header: {
+          order_number: orderHeader.order_number,
+          ledger_id: orderHeader.ledger_id,
+          order_date: orderHeader.order_date,
+          status: 'Pending',
+          payment_method: 'Pending',
+          payment_status: 'Unpaid'
+        },
+        order_items: validItems.map(item => ({
+          item_id: item.item_id,
+          qty_mt: parseFloat(item.qty_mt) || 0,
+          qty_pcs: parseInt(item.qty_pcs) || 0,
+          rate: parseFloat(item.rate) || 0,
+          amount: parseFloat(item.amount) || 0
+        }))
+      };
+
+      const response = await axios.post(`${API_BASE}/orders/bulk`, orderData);
+      
+      if (response.data.success) {
+        showNotification(
+          `Order ${orderHeader.order_number} created with ${validItems.length} items!`, 
+          'success'
+        );
+        navigate('/orders');
+      }
+    } catch (error) {
+      console.error('Error creating order:', error);
+      showNotification(
+        error.response?.data?.message || 'Failed to create order', 
+        'error'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============ DESKTOP VIEW ============
+  const renderDesktopView = () => (
+    <Box sx={{ p: 3 }}>
+      {/* Order Header Card */}
+      <Card sx={{ mb: 3, borderRadius: '12px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+        <CardContent sx={{ p: 3 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 3 }}>
+            {/* Party Name */}
+            <Autocomplete
+              options={ledgers}
+              getOptionLabel={(option) => option.party_name || ''}
+              value={ledgers.find(l => l.id === orderHeader.ledger_id) || null}
+              onChange={handlePartySelect}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Party Name"
+                  required
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: '#fff',
+                    }
+                  }}
+                />
+              )}
+            />
+
+            {/* Order No */}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <TextField
+                label="Order No"
+                value={orderHeader.order_number}
+                onChange={(e) => setOrderHeader(prev => ({ ...prev, order_number: e.target.value }))}
+                sx={{ backgroundColor: '#fff', flex: 1 }}
+              />
+              <Button
+                variant="outlined"
+                onClick={generateOrderNumber}
+                size="small"
+                sx={{ height: '56px', minWidth: '120px' }}
+              >
+                Generate
+              </Button>
+            </Box>
+
+            {/* Order Date */}
+            <TextField
+              label="Order Date"
+              type="date"
+              value={orderHeader.order_date}
+              onChange={(e) => setOrderHeader(prev => ({ ...prev, order_date: e.target.value }))}
+              InputLabelProps={{ shrink: true }}
+              sx={{ backgroundColor: '#fff' }}
+            />
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Items Table Card */}
+      <Card sx={{ borderRadius: '12px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+        <CardContent sx={{ p: 0 }}>
+          {/* Table Header */}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: '2fr 1fr 1fr 0.8fr 1fr 1fr 1fr 1.2fr 0.5fr',
+              gap: 1,
+              p: 2,
+              backgroundColor: '#e9e9e9',
+              borderBottom: '2px solid #e0e0e0',
+              fontWeight: 700,
+              fontSize: '0.85rem',
+              color: '#333',
+            }}
+          >
+            <Box>Item Name</Box>
+            <Box>Item Code</Box>
+            <Box>HSN Code</Box>
+            <Box>GST rate</Box>
+            <Box sx={{ textAlign: 'center' }}>MT Qty</Box>
+            <Box sx={{ textAlign: 'center' }}>PCS Qty</Box>
+            <Box sx={{ textAlign: 'right' }}>Rate</Box>
+            <Box sx={{ textAlign: 'right' }}>Amount</Box>
+            <Box></Box>
+          </Box>
+
+          {/* Table Rows */}
+          {orderItems.map((item, index) => (
+            <Box
+              key={item.id}
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '2fr 1fr 1fr 0.8fr 1fr 1fr 1fr 1.2fr 0.5fr',
+                gap: 1,
+                p: 2,
+                alignItems: 'center',
+                borderBottom: '1px solid #e8e8e8',
+                backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa',
+                '&:hover': { backgroundColor: '#f5f5f5' },
+              }}
+            >
+              {/* Item Name - Autocomplete */}
+              <Autocomplete
+                size="small"
+                options={items}
+                getOptionLabel={(option) => option.item_name || ''}
+                value={items.find(i => i.id === item.item_id) || null}
+                onChange={(e, newValue) => handleItemSelect(index, newValue)}
+                renderInput={(params) => (
+                  <TextField {...params} placeholder="Select Item" size="small" />
+                )}
+              />
+
+              {/* Item Code */}
+              <TextField
+                size="small"
+                value={item.item_code}
+                InputProps={{ readOnly: true }}
+                sx={{ backgroundColor: '#f9f9f9' }}
+              />
+
+              {/* HSN Code */}
+              <TextField
+                size="small"
+                value={item.hsn_code}
+                InputProps={{ readOnly: true }}
+                sx={{ backgroundColor: '#f9f9f9' }}
+              />
+
+              {/* GST Rate */}
+              <TextField
+                size="small"
+                value={item.gst_rate ? `${item.gst_rate}%` : ''}
+                InputProps={{ readOnly: true }}
+                sx={{ backgroundColor: '#f9f9f9' }}
+              />
+
+              {/* MT Qty */}
+              <TextField
+                size="small"
+                type="number"
+                value={item.qty_mt}
+                onChange={(e) => handleItemChange(index, 'qty_mt', e.target.value)}
+                placeholder="0"
+                inputProps={{ style: { textAlign: 'center' } }}
+              />
+
+              {/* PCS Qty */}
+              <TextField
+                size="small"
+                type="number"
+                value={item.qty_pcs}
+                onChange={(e) => handleItemChange(index, 'qty_pcs', e.target.value)}
+                placeholder="0"
+                inputProps={{ style: { textAlign: 'center' } }}
+              />
+
+              {/* Rate */}
+              <TextField
+                size="small"
+                type="number"
+                value={item.rate}
+                onChange={(e) => handleItemChange(index, 'rate', e.target.value)}
+                inputProps={{ style: { textAlign: 'right' } }}
+              />
+
+              {/* Amount */}
+              <TextField
+                size="small"
+                value={`₹${item.amount}`}
+                InputProps={{ readOnly: true }}
+                sx={{ 
+                  backgroundColor: '#f9f9f9',
+                  '& input': { textAlign: 'right', fontWeight: 600 }
+                }}
+              />
+
+              {/* Delete Button */}
+              <IconButton
+                onClick={() => removeItem(index)}
+                disabled={orderItems.length === 1}
+                sx={{ color: '#dc3545' }}
+              >
+                <Delete fontSize="small" />
+              </IconButton>
+            </Box>
+          ))}
+
+          {/* Add Item Button */}
+          <Box sx={{ p: 2, borderTop: '1px solid #e8e8e8' }}>
+            <Button
+              startIcon={<Add />}
+              onClick={addNewItem}
+              sx={{
+                color: '#667eea',
+                textTransform: 'none',
+                fontWeight: 600,
+              }}
+            >
+              Add Item
+            </Button>
+          </Box>
+
+          {/* Total */}
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              p: 2,
+              backgroundColor: '#f5f5f5',
+              borderTop: '2px solid #e0e0e0',
+            }}
+          >
+            <Typography variant="h6" sx={{ mr: 2, fontWeight: 600 }}>
+              Total:
+            </Typography>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: '#333' }}>
+              ₹{calculateTotal()}
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Action Buttons */}
+      <Box sx={{ display: 'flex', gap: 2, mt: 3, justifyContent: 'flex-end' }}>
+        <Button
+          variant="outlined"
+          startIcon={<ArrowBack />}
+          onClick={() => navigate('/orders')}
+          sx={{
+            borderColor: '#666',
+            color: '#666',
+            textTransform: 'none',
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          startIcon={<Save />}
+          onClick={handleSubmit}
+          disabled={loading}
+          sx={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            textTransform: 'none',
+            px: 4,
+          }}
+        >
+          {loading ? 'Saving...' : 'Save Order'}
+        </Button>
+      </Box>
+    </Box>
+  );
+
+  // ============ MOBILE VIEW ============
+  const renderMobileView = () => (
+    <Box sx={{ pb: 10 }}>
+      {/* Order Header */}
+      <Card sx={{ m: 2, borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+        <CardContent sx={{ p: 2 }}>
+          {/* Party Name */}
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+            Party Name
+          </Typography>
+          <Autocomplete
+            size="small"
+            options={ledgers}
+            getOptionLabel={(option) => option.party_name || ''}
+            value={ledgers.find(l => l.id === orderHeader.ledger_id) || null}
+            onChange={handlePartySelect}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                placeholder="Select Party"
+                sx={{ mb: 2, mt: 0.5 }}
+              />
+            )}
+          />
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                Order No
+              </Typography>
+              <TextField
+                size="small"
+                fullWidth
+                value={orderHeader.order_number}
+                onChange={(e) => setOrderHeader(prev => ({ ...prev, order_number: e.target.value }))}
+                sx={{ mt: 0.5 }}
+              />
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                Date
+              </Typography>
+              <TextField
+                size="small"
+                type="date"
+                fullWidth
+                value={orderHeader.order_date}
+                onChange={(e) => setOrderHeader(prev => ({ ...prev, order_date: e.target.value }))}
+                sx={{ mt: 0.5 }}
+              />
+            </Box>
+          </Box>
+
+          {/* Tabs */}
+          <Tabs
+            value={activeTab}
+            onChange={(e, newValue) => setActiveTab(newValue)}
+            sx={{
+              mt: 2,
+              '& .MuiTab-root': {
+                textTransform: 'none',
+                fontSize: '0.85rem',
+                minWidth: 'auto',
+                px: 2,
+              },
+              '& .Mui-selected': {
+                color: '#667eea',
+              },
+              '& .MuiTabs-indicator': {
+                backgroundColor: '#667eea',
+              },
+            }}
+          >
+            <Tab label="Item Details" />
+            <Tab label="Payment Details" />
+            <Tab label="Despatch Details" />
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Tab Content */}
+      {activeTab === 0 && (
+        <Box sx={{ px: 2 }}>
+          {/* Item Cards */}
+          {orderItems.map((item, index) => (
+            <Card
+              key={item.id}
+              sx={{
+                mb: 2,
+                borderRadius: '12px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Item Header - Collapsible */}
+              <Box
+                onClick={() => toggleItemExpand(item.id)}
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  p: 2,
+                  backgroundColor: '#f8f9fa',
+                  cursor: 'pointer',
+                  borderBottom: expandedItems[item.id] ? '1px solid #e8e8e8' : 'none',
+                }}
+              >
+                <Typography sx={{ fontWeight: 600, color: '#333' }}>
+                  {item.item_name || `Item ${index + 1}`}
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {item.amount > 0 && (
+                    <Typography sx={{ fontWeight: 600, color: '#667eea' }}>
+                      ₹{item.amount}
+                    </Typography>
+                  )}
+                  {expandedItems[item.id] ? <ExpandLess /> : <ExpandMore />}
+                </Box>
+              </Box>
+
+              {/* Item Details - Expandable */}
+              <Collapse in={expandedItems[item.id]}>
+                <CardContent sx={{ p: 2 }}>
+                  {/* Item Name */}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                      Item Name
+                    </Typography>
+                    <Autocomplete
+                      size="small"
+                      options={items}
+                      getOptionLabel={(option) => option.item_name || ''}
+                      value={items.find(i => i.id === item.item_id) || null}
+                      onChange={(e, newValue) => handleItemSelect(index, newValue)}
+                      renderInput={(params) => (
+                        <TextField {...params} placeholder="Select Item" sx={{ mt: 0.5 }} />
+                      )}
+                    />
+                  </Box>
+
+                  {/* Item Code & HSN */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                        Item Code
+                      </Typography>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        value={item.item_code}
+                        InputProps={{ readOnly: true }}
+                        sx={{ mt: 0.5, backgroundColor: '#f9f9f9' }}
+                      />
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                        HSN
+                      </Typography>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        value={item.hsn_code}
+                        InputProps={{ readOnly: true }}
+                        sx={{ mt: 0.5, backgroundColor: '#f9f9f9' }}
+                      />
+                    </Box>
+                  </Box>
+
+                  {/* Qty MT & Qty PCs */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                        Qty MT
+                      </Typography>
+                      <TextField
+                        size="small"
+                        type="number"
+                        fullWidth
+                        value={item.qty_mt}
+                        onChange={(e) => handleItemChange(index, 'qty_mt', e.target.value)}
+                        placeholder="0"
+                        sx={{ mt: 0.5 }}
+                      />
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                        Qty PCs
+                      </Typography>
+                      <TextField
+                        size="small"
+                        type="number"
+                        fullWidth
+                        value={item.qty_pcs}
+                        onChange={(e) => handleItemChange(index, 'qty_pcs', e.target.value)}
+                        placeholder="0"
+                        sx={{ mt: 0.5 }}
+                      />
+                    </Box>
+                  </Box>
+
+                  {/* Rate & Amount */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                        Rate
+                      </Typography>
+                      <TextField
+                        size="small"
+                        type="number"
+                        fullWidth
+                        value={item.rate}
+                        onChange={(e) => handleItemChange(index, 'rate', e.target.value)}
+                        sx={{ mt: 0.5 }}
+                      />
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                        Amount
+                      </Typography>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        value={`₹${item.amount}`}
+                        InputProps={{ readOnly: true }}
+                        sx={{ 
+                          mt: 0.5,
+                          backgroundColor: '#f9f9f9',
+                          '& input': { fontWeight: 600 }
+                        }}
+                      />
+                    </Box>
+                  </Box>
+
+                  {/* Delete Button */}
+                  {orderItems.length > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button
+                        size="small"
+                        color="error"
+                        startIcon={<Delete />}
+                        onClick={() => removeItem(index)}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        Remove
+                      </Button>
+                    </Box>
+                  )}
+                </CardContent>
+              </Collapse>
+            </Card>
+          ))}
+
+          {/* Add Item Button */}
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<Add />}
+            onClick={addNewItem}
+            sx={{
+              mb: 2,
+              borderColor: '#667eea',
+              color: '#667eea',
+              textTransform: 'none',
+              py: 1.5,
+              borderStyle: 'dashed',
+            }}
+          >
+            Add Another Item
+          </Button>
+
+          {/* Total Card */}
+          <Card sx={{ borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+            <CardContent sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="h6" fontWeight={600}>
+                Total Amount
+              </Typography>
+              <Typography variant="h5" fontWeight={700} color="#667eea">
+                ₹{calculateTotal()}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Box>
+      )}
+
+      {activeTab === 1 && (
+        <Box sx={{ px: 2 }}>
+          <Card sx={{ borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+            <CardContent sx={{ p: 3, textAlign: 'center' }}>
+              <Typography color="text.secondary">
+                Payment details will be available after order creation
+              </Typography>
+            </CardContent>
+          </Card>
+        </Box>
+      )}
+
+      {activeTab === 2 && (
+        <Box sx={{ px: 2 }}>
+          <Card sx={{ borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+            <CardContent sx={{ p: 3, textAlign: 'center' }}>
+              <Typography color="text.secondary">
+                Despatch details will be available after order creation
+              </Typography>
+            </CardContent>
+          </Card>
+        </Box>
+      )}
+
+      {/* Fixed Bottom Action Bar */}
+      <Paper
+        elevation={8}
+        sx={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          p: 2,
+          display: 'flex',
+          gap: 2,
+          backgroundColor: '#fff',
+          borderTop: '1px solid #e0e0e0',
+        }}
+      >
+        <Button
+          variant="outlined"
+          fullWidth
+          onClick={() => navigate('/orders')}
+          sx={{
+            borderColor: '#666',
+            color: '#666',
+            textTransform: 'none',
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          fullWidth
+          onClick={handleSubmit}
+          disabled={loading}
+          sx={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            textTransform: 'none',
+          }}
+        >
+          {loading ? 'Saving...' : 'Save Order'}
+        </Button>
+      </Paper>
+    </Box>
+  );
+
+  return (
+    <Box sx={{ bgcolor: '#f5f5f5', minHeight: '100vh' }}>
+      {/* Page Header */}
+      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', py: 2, px: { xs: 2, sm: 3 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton onClick={() => navigate('/orders')} sx={{ color: '#667eea' }}>
+            <ArrowBack />
+          </IconButton>
+          <Typography variant="h4" fontWeight="bold" color="#333" sx={{ fontSize: { xs: '1.25rem', sm: '1.75rem' } }}>
+            Create Order
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Responsive Content */}
+      {isMobile ? renderMobileView() : renderDesktopView()}
+    </Box>
+  );
+}
+
+export default CreateOrder;
