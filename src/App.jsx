@@ -16,14 +16,8 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      {/* Added className="app" to utilize styles from index.css */}
-      <div className="app"> 
-        <Router
-          future={{
-            v7_startTransition: true,
-            v7_relativeSplatPath: true,
-          }}
-        >
+      <div className="app">
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Layout>
             <Notification />
             <Routes>

@@ -37,11 +37,19 @@ function CreateOrder() {
   const navigate = useNavigate();
   const { showNotification } = useNotification();
 
+  // Generate order number on mount
+  const generateOrderNumber = () => {
+    const date = new Date();
+    const dateStr = date.toISOString().slice(0,10).replace(/-/g, '');
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `ORD-${dateStr}-${random}`;
+  };
+
   // Order Header State
   const [orderHeader, setOrderHeader] = useState({
     party_name: '',
     ledger_id: '',
-    order_number: '',
+    order_number: generateOrderNumber(),
     order_date: new Date().toISOString().split('T')[0],
   });
 
@@ -199,10 +207,7 @@ function CreateOrder() {
       return;
     }
 
-    if (!orderHeader.order_number) {
-      showNotification('Please generate an order number', 'error');
-      return;
-    }
+    // Order number is auto-generated on form load, no validation needed
 
     const validItems = orderItems.filter(item => item.item_id && (item.qty_mt || item.qty_pcs));
     if (validItems.length === 0) {
