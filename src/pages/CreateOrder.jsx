@@ -280,22 +280,13 @@ function CreateOrder() {
             />
 
             {/* Order No */}
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-              <TextField
-                label="Order No"
-                value={orderHeader.order_number}
-                onChange={(e) => setOrderHeader(prev => ({ ...prev, order_number: e.target.value }))}
-                sx={{ backgroundColor: '#fff', flex: 1 }}
-              />
-              <Button
-                variant="outlined"
-                onClick={generateOrderNumber}
-                size="small"
-                sx={{ height: '56px', minWidth: '120px' }}
-              >
-                Generate
-              </Button>
-            </Box>
+            <TextField
+              label="Order No"
+              value={orderHeader.order_number || 'Auto-generated on save'}
+              disabled
+              helperText="Order number will be auto-generated when you create the order"
+              sx={{ backgroundColor: '#f5f5f5', flex: 1 }}
+            />
 
             {/* Order Date */}
             <TextField
